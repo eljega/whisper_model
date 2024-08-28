@@ -1,2 +1,2 @@
 [tool.poetry.scripts]
-start = "gunicorn model_whisper:app"
+start = "gunicorn app:app"
