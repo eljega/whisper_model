@@ -1,2 +1,2 @@
-web: ./install_ffmpeg.sh && gunicorn app:app --bind 0.0.0.0:5000 --timeout 600
+web: ./install_ffmpeg.sh && gunicorn app:app --bind 0.0.0.0:5000 --worker-class gevent --timeout 1200 --workers 3
 
