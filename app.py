@@ -15,20 +15,23 @@ celery = make_celery(app)
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
-    video_url = request.json.get('video_url')
-    if not video_url:
-        return jsonify({'error': 'No se proporcionó ninguna URL de video'}), 400
+    if 'video' not in request.files:
+        return jsonify({'error': 'No se proporcionó ningún archivo de video'}), 400
     
-    video_filename = os.path.basename(video_url)
+    video = request.files['video']
+    video_filename = video.filename
     temp_video_path = os.path.join('/tmp', video_filename)
+    video.save(temp_video_path)
     
-    # Descargar el video desde S3 usando la URL
-    s3_client.download_file(BUCKET_NAME, video_filename, temp_video_path)
+    # Subir el video a S3
+    s3_client.upload_file(temp_video_path, BUCKET_NAME, video_filename)
+    
+    # Eliminar archivo temporal
+    os.remove(temp_video_path)
     
     # Iniciar tarea de transcripción en segundo plano
     task = transcribe_video_task.delay(video_filename)
     return jsonify({'task_id': task.id}), 202
-
 
 @celery.task
 def transcribe_video_task(video_filename):
