@@ -1,85 +1,107 @@
 import os
-import boto3
 import whisper
+import ffmpeg
+import boto3
 from flask import Flask, request, jsonify
 from celery_config import make_celery
 
+# Configuración de S3
+BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
+s3_client = boto3.client('s3')
+
+# Configuración de la aplicación Flask
 app = Flask(__name__)
 celery = make_celery(app)
-model = whisper.load_model("base")
-
-# Ruta del bucket en S3
-BUCKET_NAME = "clipgenaieljega"
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
     if 'video' not in request.files:
-        return jsonify({'error': 'No video file provided'}), 400
+        return jsonify({'error': 'No se proporcionó ningún archivo de video'}), 400
     
     video = request.files['video']
-    s3_key = f"uploads/{video.filename}"
+    video_filename = video.filename
+    temp_video_path = os.path.join('/tmp', video_filename)
+    video.save(temp_video_path)
     
-    try:
-        # Subir el archivo a S3
-        s3 = boto3.client('s3')
-        s3.upload_fileobj(video, BUCKET_NAME, s3_key)
-        print(f"Archivo subido a S3: {s3_key}")
-    except Exception as e:
-        return jsonify({'error': f'Error uploading to S3: {str(e)}'}), 500
+    # Subir el video a S3
+    s3_client.upload_file(temp_video_path, BUCKET_NAME, video_filename)
     
-    # Crear la tarea de transcripción
-    task = transcribe_video_task.delay(s3_key)
+    # Eliminar archivo temporal
+    os.remove(temp_video_path)
+    
+    # Iniciar tarea de transcripción en segundo plano
+    task = transcribe_video_task.delay(video_filename)
     return jsonify({'task_id': task.id}), 202
 
-@celery.task(bind=True, max_retries=3, default_retry_delay=60)
-def transcribe_video_task(self, s3_key):
-    s3 = boto3.client('s3')
-    local_path = f"/tmp/{os.path.basename(s3_key)}"
+@celery.task
+def transcribe_video_task(video_filename):
+    # Descargar video desde S3
+    temp_video_path = f'/tmp/{video_filename}'
+    s3_client.download_file(BUCKET_NAME, video_filename, temp_video_path)
     
-    try:
-        # Descargar desde S3
-        s3.download_file(BUCKET_NAME, s3_key, local_path)
-        print(f"Archivo descargado desde S3: {local_path}")
-        
-        # Verificar que el archivo ha sido descargado correctamente
-        if not os.path.exists(local_path):
-            raise RuntimeError(f"El archivo no existe: {local_path}")
-        
-        if os.path.getsize(local_path) == 0:
-            raise RuntimeError(f"El archivo está vacío: {local_path}")
-        
-        # Transcribir
-        print(f"Comenzando la transcripción del archivo: {local_path}")
-        result = model.transcribe(local_path)
-        
-    except Exception as exc:
-        # Reintentar en caso de error
-        print(f"Error durante la transcripción o descarga: {str(exc)}")
-        raise self.retry(exc=exc)
+    # Cargar el modelo Whisper
+    model = whisper.load_model("base")  # Cambia a "base" o "small" si es necesario
+    result = model.transcribe(temp_video_path)
     
-    finally:
-        # Eliminar el archivo temporal después de la transcripción
-        if os.path.exists(local_path):
-            os.remove(local_path)
-            print(f"Archivo temporal eliminado: {local_path}")
+    # Crear archivo de subtítulos ASS
+    ass_file_path = f'/tmp/{os.path.splitext(video_filename)[0]}.ass'
+    create_ass_subtitle_file(result['segments'], ass_file_path)
     
-    return result['segments']
+    # Añadir subtítulos al video
+    output_video_path = f'/tmp/video_con_subtitulos_{video_filename}'
+    add_stylized_subtitles(temp_video_path, ass_file_path, output_video_path)
+    
+    # Subir video con subtítulos de vuelta a S3
+    s3_output_key = f'video_con_subtitulos_{video_filename}'
+    s3_client.upload_file(output_video_path, BUCKET_NAME, s3_output_key)
+    
+    # Eliminar archivos temporales
+    os.remove(temp_video_path)
+    os.remove(ass_file_path)
+    os.remove(output_video_path)
+    
+    return {'video_url': f'https://{BUCKET_NAME}.s3.amazonaws.com/{s3_output_key}'}
 
-@app.route('/task_status/<task_id>', methods=['GET'])
-def task_status(task_id):
-    task = transcribe_video_task.AsyncResult(task_id)
+def create_ass_subtitle_file(transcription, subtitle_file):
+    ass_content = """
+[Script Info]
+Title: Subtítulos
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFF00,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.00,0.00,1,2,2,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    """
     
-    if task.state == 'PENDING':
-        response = {'state': task.state}
-    elif task.state == 'SUCCESS':
-        response = {'state': task.state, 'result': task.result}
-    elif task.state == 'FAILURE':
-        response = {'state': task.state, 'error': str(task.info)}
-    else:
-        response = {'state': task.state, 'error': 'Unknown state'}
-    
-    print(f"Estado de la tarea {task_id}: {response}")
-    return jsonify(response)
+    for segment in transcription:
+        start = format_time(segment['start'])
+        end = format_time(segment['end'])
+        text = segment['text'].strip()
+        animated_text = (
+            f"{{\\t(0,200,\\fscx50\\fscy50)\\t(200,300,\\fscx100\\fscy100)}}{text}"
+            f"{{\\t({int((float(end.split(':')[-1]) - float(start.split(':')[-1])) * 1000) - 200},{int((float(end.split(':')[-1]) - float(start.split(':')[-1])) * 1000)},\\fscx50\\fscy50)}}"
+        )
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{animated_text}\n"
+
+    with open(subtitle_file, 'w') as f:
+        f.write(ass_content)
+
+def format_time(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = seconds % 60
+    return f"{hours}:{minutes:02}:{seconds:05.2f}"
+
+def add_stylized_subtitles(video_file, subtitle_file, output_file):
+    (
+        ffmpeg
+        .input(video_file)
+        .output(output_file, vf=f'ass={subtitle_file}')
+        .run(overwrite_output=True)
+    )
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
