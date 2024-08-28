@@ -17,5 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 5000
 
 # Comando para iniciar la aplicación
-CMD ["gunicorn", "model_whisper:app", "--bind", "0.0.0.0:5000", "--timeout", "600"]
-
+CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5000", "--timeout", "1200", "--workers", "2"]
