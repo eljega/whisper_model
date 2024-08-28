@@ -35,35 +35,40 @@ def transcribe():
 
 @celery.task
 def transcribe_video_task(video_filename):
-    # Descargar video desde S3
-    temp_video_path = f'/tmp/{video_filename}'
-    s3_client.download_file(BUCKET_NAME, video_filename, temp_video_path)
-    
-    # Cargar el modelo Whisper
-    model = whisper.load_model("base")  # Cambia a "base" o "small" si es necesario
-    result = model.transcribe(temp_video_path)
-    
-    # Crear archivo de subtítulos ASS
-    ass_file_path = f'/tmp/{os.path.splitext(video_filename)[0]}.ass'
-    create_ass_subtitle_file(result['segments'], ass_file_path)
-    
-    # Añadir subtítulos al video
-    output_video_path = f'/tmp/video_con_subtitulos_{video_filename}'
-    add_stylized_subtitles(temp_video_path, ass_file_path, output_video_path)
-    
-    # Subir video con subtítulos de vuelta a S3
-    s3_output_key = f'video_con_subtitulos_{video_filename}'
-    s3_client.upload_file(output_video_path, BUCKET_NAME, s3_output_key)
-    
-    # Eliminar archivos temporales
-    os.remove(temp_video_path)
-    os.remove(ass_file_path)
-    os.remove(output_video_path)
-    
-    # Retornar un objeto JSON bien formado
-    return {
-        'video_url': f'https://{BUCKET_NAME}.s3.amazonaws.com/{s3_output_key}'
-    }
+    try:
+        # Descargar video desde S3
+        temp_video_path = f'/tmp/{video_filename}'
+        s3_client.download_file(BUCKET_NAME, video_filename, temp_video_path)
+        
+        # Cargar el modelo Whisper
+        model = whisper.load_model("base")  # Cambia a "base" o "small" si es necesario
+        result = model.transcribe(temp_video_path)
+        
+        # Crear archivo de subtítulos ASS
+        ass_file_path = f'/tmp/{os.path.splitext(video_filename)[0]}.ass'
+        create_ass_subtitle_file(result['segments'], ass_file_path)
+        
+        # Añadir subtítulos al video
+        output_video_path = f'/tmp/video_con_subtitulos_{video_filename}'
+        add_stylized_subtitles(temp_video_path, ass_file_path, output_video_path)
+        
+        # Subir video con subtítulos de vuelta a S3
+        s3_output_key = f'video_con_subtitulos_{video_filename}'
+        s3_client.upload_file(output_video_path, BUCKET_NAME, s3_output_key)
+        
+        # Eliminar archivos temporales
+        os.remove(temp_video_path)
+        os.remove(ass_file_path)
+        os.remove(output_video_path)
+        
+        # Asegúrate de retornar un objeto JSON bien formado
+        return {
+            'result': {
+                'video_url': f'https://{BUCKET_NAME}.s3.amazonaws.com/{s3_output_key}'
+            }
+        }
+    except Exception as e:
+        return {'error': str(e)}
 
 
 def create_ass_subtitle_file(transcription, subtitle_file):
