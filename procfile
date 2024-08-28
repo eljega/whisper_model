@@ -1,1 +1,2 @@
-web: gunicorn app:app
+web: ./install_ffmpeg.sh && gunicorn app:app
+
