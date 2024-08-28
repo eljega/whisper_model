@@ -6,7 +6,7 @@ from celery_config import make_celery
 
 app = Flask(__name__)
 celery = make_celery(app)
-model = whisper.load_model("base")
+model = whisper.load_model("tiny")
 
 # Ruta del bucket en S3
 BUCKET_NAME = "clipgenaieljega"
