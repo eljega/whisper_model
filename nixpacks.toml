@@ -1,0 +1,8 @@
+[phases.setup]
+apt_pkgs = ["ffmpeg"]
+
+[phases.install]
+run = "python -m venv /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt"
+
+[phases.start]
+run = "gunicorn model_whisper:app"
