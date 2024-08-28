@@ -3,6 +3,7 @@ import boto3
 import os
 from celery_config import make_celery
 from botocore.exceptions import NoCredentialsError
+import whisper
 
 app = Flask(__name__)
 celery = make_celery(app)
