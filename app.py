@@ -60,7 +60,11 @@ def transcribe_video_task(video_filename):
     os.remove(ass_file_path)
     os.remove(output_video_path)
     
-    return {'video_url': f'https://{BUCKET_NAME}.s3.amazonaws.com/{s3_output_key}'}
+    # Retornar un objeto JSON bien formado
+    return {
+        'video_url': f'https://{BUCKET_NAME}.s3.amazonaws.com/{s3_output_key}'
+    }
+
 
 def create_ass_subtitle_file(transcription, subtitle_file):
     ass_content = """
