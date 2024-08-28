@@ -36,6 +36,12 @@ def transcribe():
 @celery.task
 def transcribe_video_task(temp_video_path):
     logging.info(f"Transcribiendo el archivo: {temp_video_path}")
+    
+    # Verificar si el archivo aún existe antes de intentar procesarlo
+    if not os.path.exists(temp_video_path):
+        logging.error(f"El archivo no existe: {temp_video_path}")
+        raise RuntimeError(f"El archivo no existe: {temp_video_path}")
+    
     result = model.transcribe(temp_video_path)
     os.remove(temp_video_path)
     return result['segments']
