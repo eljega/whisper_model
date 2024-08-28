@@ -103,5 +103,35 @@ def add_stylized_subtitles(video_file, subtitle_file, output_file):
         .run(overwrite_output=True)
     )
 
+
+@app.route('/task_status/<task_id>', methods=['GET'])
+def task_status(task_id):
+    task = celery.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'current': 0,
+            'total': 1,
+            'status': 'Pendiente...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'current': task.info.get('current', 0),
+            'total': task.info.get('total', 1),
+            'status': task.info.get('status', ''),
+            'result': task.info.get('result', '') if task.state == 'SUCCESS' else None
+        }
+    else:
+        # something went wrong in the background job
+        response = {
+            'state': task.state,
+            'current': 1,
+            'total': 1,
+            'status': str(task.info),  # this is the exception raised
+        }
+    return jsonify(response)
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
