@@ -71,29 +71,61 @@ def transcribe_video_task(video_filename):
         return {'error': str(e)}
 
     
+def split_text_to_single_line(text, max_chars=40):
+    # Dividir el texto en partes que no excedan max_chars caracteres
+    words = text.split()
+    lines = []
+    current_line = ""
+    
+    for word in words:
+        if len(current_line) + len(word) + 1 > max_chars:
+            lines.append(current_line.strip())
+            current_line = word
+        else:
+            current_line += " " + word
+    
+    if current_line:
+        lines.append(current_line.strip())
+    
+    return lines
+
 def create_ass_subtitle_file(transcription, subtitle_file):
     ass_content = """
 [Script Info]
-Title: Subtítulos
+Title: Subtítulos con Pop-Up
 ScriptType: v4.00+
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,20,&H00FFFF00,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.00,0.00,1,2,2,2,10,10,10,1
+Style: Default,Arial,16,&H00FFFF00,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0.00,0.00,1,2,2,2,10,10,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     """
-    
+
+    previous_end_time = 0  # Para rastrear el final del subtítulo anterior
+
     for segment in transcription:
-        start = format_time(segment['start'])
-        end = format_time(segment['end'])
+        start_time = segment['start']
+        end_time = segment['end']
         text = segment['text'].strip()
-        animated_text = (
-            f"{{\\t(0,200,\\fscx50\\fscy50)\\t(200,300,\\fscx100\\fscy100)}}{text}"
-            f"{{\\t({int((float(end.split(':')[-1]) - float(start.split(':')[-1])) * 1000) - 200},{int((float(end.split(':')[-1]) - float(start.split(':')[-1])) * 1000)},\\fscx50\\fscy50)}}"
-        )
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{animated_text}\n"
+
+        # Dividir el texto en líneas de una sola línea
+        lines = split_text_to_single_line(text, max_chars=40)
+        
+        for line in lines:
+            # Ajustar los tiempos para evitar solapamientos
+            start = max(previous_end_time, start_time)
+            duration_per_line = (end_time - start_time) / len(lines)
+            end = start + duration_per_line
+            
+            animated_text = (
+                f"{{\\t(0,200,\\fscx50\\fscy50)\\t(200,300,\\fscx100\\fscy100)}}{line}"
+                f"{{\\t({int(duration_per_line * 1000) - 200},{int(duration_per_line * 1000)},\\fscx50\\fscy50)}}"
+            )
+            ass_content += f"Dialogue: 0,{format_time(start)},{format_time(end)},Default,,0,0,0,,{animated_text}\n"
+            
+            previous_end_time = end
 
     with open(subtitle_file, 'w') as f:
         f.write(ass_content)
